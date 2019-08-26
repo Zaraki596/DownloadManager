@@ -151,15 +151,13 @@ class MainActivity : AppCompatActivity() {
                         tv_file_size_total.text =
                             Utlis.getProgressDisplayLine(progress.currentBytes, progress.totalBytes)
 
-
                         //TO detect the speed of the downloads
                         val dec = java.text.DecimalFormat("####.##")
                         mConnectionClassManager.addBandwidth(
-                            progress.totalBytes,
-                            SystemClock.currentThreadTimeMillis()
+                            progress.totalBytes, SystemClock.currentThreadTimeMillis()
                         )
-                        tv_spd_paus.text =
-                            (dec.format(mConnectionClassManager.downloadKBitsPerSecond / 8000)).toString()
+                         tv_spd_paus.text =
+                             (dec.format(mConnectionClassManager.downloadKBitsPerSecond / 8000)).toString()
 
                         //Getting the progress to the ProgressBAr
                         pb_dwnlding.progress = per.toInt()
