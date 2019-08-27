@@ -39,10 +39,7 @@ dependencies {
     implementation 'com.google.android.material:material:1.0.0'
 
     //Download Library
-    implementation 'com.mindorks.android:prdownloader:0.6.0'
-
-    //facebook connection library for handling the speed and fluctuating network
-    implementation 'com.facebook.network.connectionclass:connectionclass:1.0.1'
+    implementation  "androidx.tonyodev.fetch2:xfetch2:3.1.4"
 
 
     //Download Library

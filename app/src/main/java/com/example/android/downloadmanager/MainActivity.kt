@@ -3,9 +3,9 @@ package com.example.android.downloadmanager
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
-import android.os.SystemClock
 import android.util.Log
 import android.view.Menu
 import android.view.MenuInflater
@@ -16,35 +16,29 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.downloader.*
-import com.facebook.network.connectionclass.ConnectionClassManager
-import com.facebook.network.connectionclass.DeviceBandwidthSampler
+import com.tonyodev.fetch2.*
+import com.tonyodev.fetch2.util.toDownloadInfo
+import com.tonyodev.fetch2core.DownloadBlock
+import com.tonyodev.fetch2core.Func
 import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.android.synthetic.main.download_item.*
+import java.io.File
 
 
 class MainActivity : AppCompatActivity() {
 
     //Setting download Id for the per download
-    private var downloadID: Int = 0
-
-
-    //Initializing facebook connection class library
-    val mConnectionClassManager: ConnectionClassManager = ConnectionClassManager.getInstance()
-    val mDeviceBandwidthSampler: DeviceBandwidthSampler = DeviceBandwidthSampler.getInstance()
+    private lateinit var fetch: Fetch
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        val fetchConfiguration: FetchConfiguration = FetchConfiguration.Builder(this)
+            .enableLogging(true)
+            .enableRetryOnNetworkGain(true)
+            .setDownloadConcurrentLimit(4).build()
+        fetch = Fetch.Impl.getInstance(fetchConfiguration)
 
-
-        //Intiallizing PRdownloader library
-        val config: PRDownloaderConfig = PRDownloaderConfig.newBuilder()
-            .setDatabaseEnabled(true)
-            .setConnectTimeout(30000)
-            .setReadTimeout(30000)
-            .build()
-        PRDownloader.initialize(applicationContext, config)
 
 
 
@@ -118,104 +112,132 @@ class MainActivity : AppCompatActivity() {
 
         /*
         To download the file we have to implement this method , Used third party library*/
-        mDeviceBandwidthSampler.startSampling()
         downLoadFile()
     }
 
     private fun downLoadFile() {
         webview_dwnld.setDownloadListener { url, userAgent, contentDescription, mimetype, contentLength ->
-
+            /*Downloaded File Path*/
+            val dirPath: String = getExternalFilesDir(null)!!.absolutePath
             /*Parsing the name from the url*/
             val fileName: String = URLUtil.guessFileName(url, contentDescription, mimetype)
-            /*Downloaded File Path*/
-            val dirPath: String = Environment.getExternalStorageDirectory().absolutePath
-            pb_dwnlding.progress = 0
-            /*Start of download progress by setting listeners
-            **/
-            downloadID = PRDownloader.download(url, dirPath, fileName)
-                .build()
-                .setOnStartOrResumeListener(object : OnStartOrResumeListener {
-                    override fun onStartOrResume() {
-                        Log.d("Check Error", "on Start Reached here")
+
+
+            val request: Request = Request(url, dirPath)
+            request.priority = Priority.HIGH
+            request.networkType = NetworkType.ALL
+
+            fetch.enqueue(request, object : Func<Request> {
+                override fun call(result: Request) {
+                    Toast.makeText(this@MainActivity, "Call at the enquee", Toast.LENGTH_SHORT).show()
+                }
+            }, object : Func<Error> {
+                override fun call(result: Error) {
+                    Toast.makeText(this@MainActivity, "Error at the enquee", Toast.LENGTH_SHORT).show()
+                }
+            })
+
+
+            val fetchListener: FetchListener = object : FetchListener {
+                override fun onAdded(download: Download) {
+                    if (request.id == download.id) {
+                        tv_file_size_total.text = (download.total/8000).toString()
                         tv_dwnldng_file_name.text = fileName
                     }
-                })
-                .setOnProgressListener(object : OnProgressListener {
-                    override fun onProgress(progress: Progress?) {
-                        iv_pause_resume.setImageResource(R.drawable.ic_pause)
-                        //Converting progress into int value for the progress bar
-                        val per =
-                            (progress?.currentBytes!!.toFloat() / progress.totalBytes.toFloat()) * 100.00
+                }
 
-                        //Showing the size of the file downloaded and the current file size
-                        tv_file_size_total.text =
-                            Utlis.getProgressDisplayLine(progress.currentBytes, progress.totalBytes)
+                override fun onCancelled(download: Download) {
+                    Toast.makeText(this@MainActivity, "Download Cancelled", Toast.LENGTH_SHORT).show()
+                }
 
-                        //TO detect the speed of the downloads
-                        val dec = java.text.DecimalFormat("####.##")
-                        mConnectionClassManager.addBandwidth(
-                            progress.totalBytes, SystemClock.currentThreadTimeMillis()
-                        )
-                         tv_spd_paus.text =
-                             (dec.format(mConnectionClassManager.downloadKBitsPerSecond / 8000)).toString()
+                override fun onCompleted(download: Download) {
+                    Toast.makeText(this@MainActivity, "File Downloaded", Toast.LENGTH_SHORT).show()
+                }
 
-                        //Getting the progress to the ProgressBAr
-                        pb_dwnlding.progress = per.toInt()
+                override fun onDeleted(download: Download) {
+                    Toast.makeText(this@MainActivity, "File Deleted", Toast.LENGTH_SHORT).show()
+                }
+
+                override fun onDownloadBlockUpdated(
+                    download: Download,
+                    downloadBlock: DownloadBlock,
+                    totalBlocks: Int
+                ) {
+                    Toast.makeText(this@MainActivity, "Download BLock Updated", Toast.LENGTH_SHORT).show()
+                }
+
+                override fun onError(download: Download, error: Error, throwable: Throwable?) {
+                    Toast.makeText(this@MainActivity, "Error occurred : $error", Toast.LENGTH_SHORT)
+                        .show()
+                }
+
+                override fun onPaused(download: Download) {
+                    iv_pause_resume.setImageResource(R.drawable.ic_play)
+                    iv_pause_resume.setOnClickListener {
+                        fetch.resume(request.id)
                     }
-                })
-                .setOnPauseListener(object : OnPauseListener {
-                    override fun onPause() {
-                        mDeviceBandwidthSampler.stopSampling()
-                        iv_pause_resume.setImageResource(R.drawable.ic_play)
-                        Log.d("Check Error", "ON PAUSE LISTENER Reached here")
-                        Toast.makeText(this@MainActivity, "Download Paused", Toast.LENGTH_SHORT)
+                }
+
+                override fun onProgress(
+                    download: Download,
+                    etaInMilliSeconds: Long,
+                    downloadedBytesPerSecond: Long
+                ) {
+                        if(request.id == download.id) {
+
+
+                            pb_dwnlding.progress = download.progress
+                            tv_file_size_total.text =
+                                download.downloaded.toString() + "/" + download.total.toString()
+                            tv_spd_paus.text = (downloadedBytesPerSecond / 8000).toString()
+                        }
+
+                }
+
+                override fun onQueued(download: Download, waitingOnNetwork: Boolean) {
+                    if(request.id == download.id) {
+                        Toast.makeText(this@MainActivity, "On queued", Toast.LENGTH_SHORT).show()
+                    }
+
+                }
+
+                override fun onRemoved(download: Download) {
+                    Toast.makeText(this@MainActivity, "ON Removed Called", Toast.LENGTH_SHORT).show()
+                }
+
+                override fun onResumed(download: Download) {
+                    if(request.id == download.id) {
+                        Toast.makeText(this@MainActivity, "On resumed Called", Toast.LENGTH_SHORT)
                             .show()
+                        iv_pause_resume.setOnClickListener {
+                            fetch.pause(request.id)
+                        }
                     }
-                })
-                .setOnCancelListener(object : OnCancelListener {
-                    override fun onCancel() {
-                        mDeviceBandwidthSampler.stopSampling()
-                        Log.d("Check Error", "ON CANCEL Reached here")
-                        Toast.makeText(this@MainActivity, "Download Cancelled", Toast.LENGTH_SHORT)
-                            .show()
+                }
 
-                    }
-                })
-                .start(object : OnDownloadListener {
-                    override fun onDownloadComplete() {
-                        mDeviceBandwidthSampler.stopSampling()
-                        Log.d("Check Error", "OnDOWNLOAD COMPLETE Reached here")
-                        Toast.makeText(this@MainActivity, "File Downloaded", Toast.LENGTH_SHORT)
-                            .show()
+
+                override fun onStarted(
+                    download: Download,
+                    downloadBlocks: List<DownloadBlock>,
+                    totalBlocks: Int
+                ) {
+                    if (request.id == download.id){
+
+                        Toast.makeText(this@MainActivity, "On started Called", Toast.LENGTH_SHORT).show()
                     }
 
-                    override fun onError(error: Error?) {
-                        mDeviceBandwidthSampler.stopSampling()
-                        Log.d("Check Error", "Error message ${error.toString()}")
-                        Toast.makeText(this@MainActivity, "Error Occurred", Toast.LENGTH_SHORT)
-                            .show()
-                    }
-                })
-            /*
-            * TO Start and pause the current download*/
-            iv_pause_resume.setOnClickListener {
-                if (PRDownloader.getStatus(downloadID) == Status.RUNNING) { //TO pause the downloaded current download
-                    PRDownloader.pause(downloadID)
-                } else if (PRDownloader.getStatus(downloadID) == Status.PAUSED) {  //TO Resume the current download
-                    PRDownloader.resume(downloadID)
+                }
+
+                override fun onWaitingNetwork(download: Download) {
                 }
             }
+            fetch.addListener(fetchListener)
         }
     }
 
-    override fun onResume() {
-        if (Status.COMPLETED != PRDownloader.getStatus(downloadID) && Status.PAUSED == PRDownloader.getStatus(
-                downloadID
-            )
-        ) {
-            PRDownloader.resume(downloadID)
-        }
-        super.onResume()
+    override fun onDestroy() {
+        super.onDestroy()
+        fetch.close()
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
